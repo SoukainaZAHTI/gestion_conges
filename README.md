@@ -12,7 +12,7 @@ Cela crée le fichier conges.db avec les tables nécessaires.
 Pour réinitialiser complètement la base (⚠️ supprime toutes les données) :
 python -c "from database import reset_db; reset_db()"
 
-## Lancer le script principal#
+## Lancer le script principal
 python main.py
 
 Le menu principal s’affiche :
@@ -21,24 +21,28 @@ Le menu principal s’affiche :
 3. Quitter
 
 Vous pouvez ensuite :
-1.créer un compte,
-2.vous connecter,
-3.ajouter des demandes de congé,
+1. créer un compte
+2. vous connecter
+3. ajouter des demandes de congé
 ou, avec un compte RH, valider/refuser les demandes.
 
 
-##Reproduire le scénario de test minimal#
+## Reproduire le scénario de test minimal
 
 Exécuter le script de test automatisé :
 python test.py
 
 Ce script :
 
-1.Réinitialise la base,
-2.Crée des employés et utilisateurs de test,
-3.Crée plusieurs demandes (valides et invalides),
-4.Valide/refuse automatiquement les demandes,
-5.Affiche les soldes finaux et statistiques.
+1. Réinitialise la base
+
+2. Crée des employés et utilisateurs de test
+
+3. Crée plusieurs demandes (valides et invalides)
+
+4. Valide/refuse automatiquement les demandes
+
+5. Affiche les soldes finaux et statistiques
 
 Aucune action manuelle n’est nécessaire.
 

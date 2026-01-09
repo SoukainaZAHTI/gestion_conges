@@ -1,7 +1,7 @@
-#Système de Gestion des Congés — Guide d’exécution#
+#Système de Gestion des Congés — Guide d’exécution
 Ce document explique comment initialiser la base de données, lancer l’application et exécuter le scénario de test minimal.
 
-#Initialisation de la base de données#
+##Initialisation de la base de données#
 
 Dans le dossier du projet, exécuter :
 python -c "from database import init_db; init_db()"
@@ -11,7 +11,7 @@ Cela crée le fichier conges.db avec les tables nécessaires.
 Pour réinitialiser complètement la base (⚠️ supprime toutes les données) :
 python -c "from database import reset_db; reset_db()"
 
-#Lancer le script principal#
+##Lancer le script principal#
 python main.py
 
 Le menu principal s’affiche :
@@ -26,7 +26,7 @@ Vous pouvez ensuite :
 ou, avec un compte RH, valider/refuser les demandes.
 
 
-#Reproduire le scénario de test minimal#
+##Reproduire le scénario de test minimal#
 
 Exécuter le script de test automatisé :
 python test.py

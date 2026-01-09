@@ -1,71 +1,76 @@
-from database import get_connection
-from models.employe import Employe
-from models.types_conge import CongeFactory, Conge
+"""
+Service de gestion des congés
+Responsabilité: Logique métier et orchestration des opérations
+"""
+from models.types_conge import CongeFactory
 from utils.validators import valider_periode
+from services.dao import EmployeDAO, DemandeDAO
 
 
 class GestionConges:
+    """
+    Classe de gestion centrale - Service applicatif
+    Responsabilités:
+    - Orchestrer les opérations métier
+    - Valider les règles métier
+    - Coordonner l'accès aux données via les DAO
+    """
+
     SOLDE_INITIAL_ANNUEL = 22
 
     def add_employe(self, matricule, nom, prenom, service, solde=None):
-        """Ajoute un employé avec un solde par défaut"""
+        """
+        Ajoute un employé
+        Cette méthode appartient à GestionConges car elle orchestre une opération métier,
+        pas à Employe qui est un objet de données
+        """
         if solde is None:
             solde = self.SOLDE_INITIAL_ANNUEL
 
-        conn = get_connection()
-        cur = conn.cursor()
         try:
-            cur.execute("""
-                        INSERT INTO employes (matricule, nom, prenom, service, solde_conges)
-                        VALUES (?, ?, ?, ?, ?)""",
-                        (matricule, nom, prenom, service, solde))
-            conn.commit()
-            print(f"✅ Employé ajouté avec un solde de {solde} jours")
+            employe_id = EmployeDAO.creer(matricule, nom, prenom, service, solde)
+            print(f"✅ Employé ajouté avec un solde de {solde} jours (ID: {employe_id})")
             return True
-        except:
-            print("❌ Erreur: Ce matricule existe déjà")
+        except Exception as e:
+            print(f"❌ Erreur lors de l'ajout: {e}")
             return False
-        finally:
-            conn.close()
 
     def list_employes(self):
-        conn = get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM employes")
-        rows = cur.fetchall()
-        conn.close()
-        return [Employe(**row) for row in rows]
+        """Liste tous les employés via le DAO"""
+        try:
+            return EmployeDAO.lister_tous()
+        except Exception as e:
+            print(f"❌ Erreur lors de la récupération: {e}")
+            return []
 
     def ajouter_demande(self, employe_id, date_debut, date_fin, type_conge, commentaire="", **kwargs):
         """
-        Ajoute une demande en utilisant le polymorphisme
-        **kwargs permet de passer des paramètres spécifiques (ex: motif pour CongeExceptionnel)
+        Ajoute une demande de congé avec validation métier
+        Cette méthode ne devrait PAS être dans Employe car elle nécessite
+        l'accès à la base de données et l'orchestration de plusieurs opérations
         """
-        # Validate dates
+        # 1. Valider les dates
         valide, message = valider_periode(date_debut, date_fin)
         if not valide:
             print(f"❌ {message}")
             return False
 
-        conn = get_connection()
-        cur = conn.cursor()
-
-        # Get employee info
-        cur.execute("SELECT * FROM employes WHERE id = ?", (employe_id,))
-        emp_row = cur.fetchone()
-
-        if not emp_row:
-            print("❌ Employé non trouvé")
-            conn.close()
+        # 2. Récupérer l'employé via DAO
+        try:
+            employe = EmployeDAO.trouver_par_id(employe_id)
+        except Exception as e:
+            print(f"❌ Erreur d'accès aux données: {e}")
             return False
 
-        employe = Employe(**emp_row)
+        if not employe:
+            print("❌ Employé non trouvé")
+            return False
 
-        # Create the appropriate Conge object using Factory
+        # 3. Créer l'objet Conge avec le Factory Pattern (polymorphisme)
         try:
             conge = CongeFactory.creer_conge(
                 type_conge,
-                None,  # id will be assigned by database
+                None,
                 employe_id,
                 date_debut,
                 date_fin,
@@ -75,57 +80,49 @@ class GestionConges:
             )
         except ValueError as e:
             print(f"❌ {e}")
-            conn.close()
             return False
 
-        # Use polymorphism to validate the request
+        # 4. Valider la demande selon les règles métier (polymorphisme)
         valide, message = conge.valider_demande(employe.solde_conges)
 
         if not valide:
             print(f"❌ {message}")
-            conn.close()
             return False
 
-        # Store in database with type_conge string
-        cur.execute("""
-                    INSERT INTO demandes_conge (employe_id, date_debut, date_fin, type_conge, statut, commentaire)
-                    VALUES (?, ?, ?, ?, 'En attente', ?)
-                    """, (employe_id, date_debut, date_fin, conge.get_type(), commentaire))
-
-        conn.commit()
-        conn.close()
-
-        jours = conge.calculer_jours()
-        print(f"✅ Demande de {jours} jours ajoutée ({conge.get_type()})")
-        return True
+        # 5. Enregistrer via DAO
+        try:
+            demande_id = DemandeDAO.creer(
+                employe_id,
+                date_debut,
+                date_fin,
+                conge.get_type(),
+                "En attente",
+                commentaire
+            )
+            jours = conge.calculer_jours()
+            print(f"✅ Demande de {jours} jours ajoutée ({conge.get_type()}) - ID: {demande_id}")
+            return True
+        except Exception as e:
+            print(f"❌ Erreur lors de l'enregistrement: {e}")
+            return False
 
     def valider_demande(self, demande_id):
-        """Valide une demande en utilisant le polymorphisme"""
-        conn = get_connection()
-        cur = conn.cursor()
-
-        # Get full request details with JOIN
-        cur.execute("""
-                    SELECT d.*, e.solde_conges, e.nom, e.prenom, e.matricule
-                    FROM demandes_conge d
-                             JOIN employes e ON d.employe_id = e.id
-                    WHERE d.id = ?
-                    """, (demande_id,))
-
-        row = cur.fetchone()
-
-        if not row:
-            print("❌ Demande introuvable")
-            conn.close()
-            return False
-
-        if row['statut'] != 'En attente':
-            print(f"❌ Cette demande a déjà été {row['statut']}")
-            conn.close()
-            return False
-
-        # Create Conge object using Factory (polymorphism)
+        """
+        Valide une demande - Exemple d'orchestration de plusieurs opérations
+        """
         try:
+            # 1. Récupérer la demande via DAO
+            row = DemandeDAO.trouver_par_id(demande_id)
+
+            if not row:
+                print("❌ Demande introuvable")
+                return False
+
+            if row['statut'] != 'En attente':
+                print(f"❌ Cette demande a déjà été {row['statut']}")
+                return False
+
+            # 2. Créer l'objet Conge (polymorphisme)
             conge = CongeFactory.creer_conge(
                 row['type_conge'],
                 row['id'],
@@ -135,129 +132,95 @@ class GestionConges:
                 row['statut'],
                 row['commentaire']
             )
-        except ValueError as e:
-            print(f"❌ {e}")
-            conn.close()
+
+            # 3. Valider selon les règles métier (polymorphisme)
+            valide, message = conge.valider_demande(row['solde_conges'])
+
+            if not valide:
+                print(f"❌ VALIDATION IMPOSSIBLE!")
+                print(f"   Employé: {row['nom']} {row['prenom']}")
+                print(f"   {message}")
+                return False
+
+            # 4. Mettre à jour le statut via DAO
+            DemandeDAO.mettre_a_jour_statut(demande_id, 'Validée')
+
+            # 5. Déduire du solde si nécessaire (polymorphisme)
+            if conge.deduit_du_solde():
+                jours_a_deduire = conge.calculer_jours_deductibles()
+                EmployeDAO.deduire_jours(row['employe_id'], jours_a_deduire)
+                print(f"✅ Demande validée - {jours_a_deduire} jours déduits")
+            else:
+                print(f"✅ Demande validée ({conge.get_type()} - pas de déduction)")
+
+            return True
+
+        except Exception as e:
+            print(f"❌ Erreur lors de la validation: {e}")
             return False
-
-        # Validate using polymorphic method
-        valide, message = conge.valider_demande(row['solde_conges'])
-
-        if not valide:
-            print(f"❌ VALIDATION IMPOSSIBLE!")
-            print(f"   Employé: {row['nom']} {row['prenom']}")
-            print(f"   {message}")
-            conn.close()
-            return False
-
-        # Update status
-        cur.execute("UPDATE demandes_conge SET statut = 'Validée' WHERE id = ?", (demande_id,))
-
-        # Deduct from balance if needed (polymorphism)
-        if conge.deduit_du_solde():
-            jours_a_deduire = conge.calculer_jours_deductibles()
-            cur.execute(
-                "UPDATE employes SET solde_conges = solde_conges - ? WHERE id = ?",
-                (jours_a_deduire, row['employe_id'])
-            )
-            print(f"✅ Demande validée - {jours_a_deduire} jours déduits")
-        else:
-            print(f"✅ Demande validée ({conge.get_type()} - pas de déduction)")
-
-        conn.commit()
-        conn.close()
-        return True
 
     def refuser_demande(self, demande_id):
-        conn = get_connection()
-        cur = conn.cursor()
+        """Refuse une demande"""
+        try:
+            row = DemandeDAO.trouver_par_id(demande_id)
 
-        cur.execute("SELECT statut FROM demandes_conge WHERE id = ?", (demande_id,))
-        result = cur.fetchone()
+            if not row:
+                print("❌ Demande introuvable")
+                return False
 
-        if not result:
-            print("❌ Demande introuvable")
-            conn.close()
+            if row['statut'] != 'En attente':
+                print(f"❌ Cette demande a déjà été {row['statut']}")
+                return False
+
+            DemandeDAO.mettre_a_jour_statut(demande_id, 'Refusée')
+            print("✅ Demande refusée")
+            return True
+
+        except Exception as e:
+            print(f"❌ Erreur: {e}")
             return False
-
-        if result['statut'] != 'En attente':
-            print(f"❌ Cette demande a déjà été {result['statut']}")
-            conn.close()
-            return False
-
-        cur.execute("UPDATE demandes_conge SET statut = 'Refusée' WHERE id = ?", (demande_id,))
-        conn.commit()
-        conn.close()
-        print("✅ Demande refusée")
-        return True
 
     def lister_demandes_en_attente(self):
-        """Liste toutes les demandes en attente avec objets polymorphiques"""
-        conn = get_connection()
-        cur = conn.cursor()
-        cur.execute("""
-                    SELECT d.*, e.nom, e.prenom, e.matricule, e.solde_conges, e.service
-                    FROM demandes_conge d
-                             JOIN employes e ON d.employe_id = e.id
-                    WHERE d.statut = 'En attente'
-                    ORDER BY d.date_debut
-                    """)
-        rows = cur.fetchall()
-        conn.close()
-
-        # Convert to Conge objects with employee info attached
-        conges = []
-        for row in rows:
-            conge = CongeFactory.creer_conge(
-                row['type_conge'],
-                row['id'],
-                row['employe_id'],
-                row['date_debut'],
-                row['date_fin'],
-                row['statut'],
-                row['commentaire']
-            )
-            # Attach employee info for display
-            conge.nom = row['nom']
-            conge.prenom = row['prenom']
-            conge.matricule = row['matricule']
-            conge.solde_conges = row['solde_conges']
-            conge.service = row['service']
-            conges.append(conge)
-
-        return conges
-
-    def get_employe_by_matricule(self, matricule):
-        conn = get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM employes WHERE matricule = ?", (matricule,))
-        row = cur.fetchone()
-        conn.close()
-        return Employe(**row) if row else None
-
-    def get_employe_by_id(self, employe_id):
-        conn = get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM employes WHERE id = ?", (employe_id,))
-        row = cur.fetchone()
-        conn.close()
-        return Employe(**row) if row else None
+        """Liste les demandes en attente avec objets polymorphiques"""
+        try:
+            rows = DemandeDAO.lister_par_statut('En attente')
+            return self._convertir_rows_en_conges(rows)
+        except Exception as e:
+            print(f"❌ Erreur: {e}")
+            return []
 
     def lister_demandes_par_employe(self, employe_id):
-        """Liste toutes les demandes d'un employé spécifique"""
-        conn = get_connection()
-        cur = conn.cursor()
-        cur.execute("""
-                    SELECT d.*, e.nom, e.prenom, e.matricule, e.solde_conges, e.service
-                    FROM demandes_conge d
-                             JOIN employes e ON d.employe_id = e.id
-                    WHERE d.employe_id = ?
-                    ORDER BY d.date_debut DESC
-                    """, (employe_id,))
-        rows = cur.fetchall()
-        conn.close()
+        """Liste les demandes d'un employé"""
+        try:
+            rows = DemandeDAO.lister_par_employe(employe_id)
+            return self._convertir_rows_en_conges(rows)
+        except Exception as e:
+            print(f"❌ Erreur: {e}")
+            return []
 
-        # Convert to Conge objects with employee info attached
+    def lister_demandes_validees(self):
+        """Liste les demandes validées"""
+        try:
+            rows = DemandeDAO.lister_par_statut('Validée')
+            return self._convertir_rows_en_conges(rows)
+        except Exception as e:
+            print(f"❌ Erreur: {e}")
+            return []
+
+    def lister_demandes_refusees(self):
+        """Liste les demandes refusées"""
+        try:
+            rows = DemandeDAO.lister_par_statut('Refusée')
+            return self._convertir_rows_en_conges(rows)
+        except Exception as e:
+            print(f"❌ Erreur: {e}")
+            return []
+
+    def _convertir_rows_en_conges(self, rows):
+        """
+        Méthode privée pour convertir les résultats SQL en objets Conge
+        Exemple d'encapsulation: méthode interne non exposée
+        """
         conges = []
         for row in rows:
             try:
@@ -270,7 +233,7 @@ class GestionConges:
                     row['statut'],
                     row['commentaire']
                 )
-                # Attach employee info for display
+                # Attacher les infos de l'employé pour l'affichage
                 conge.nom = row['nom']
                 conge.prenom = row['prenom']
                 conge.matricule = row['matricule']
@@ -278,7 +241,22 @@ class GestionConges:
                 conge.service = row['service']
                 conges.append(conge)
             except ValueError as e:
-                print(f"⚠️  Erreur lors du chargement de la demande {row['id']}: {e}")
+                print(f"⚠️  Erreur: {e}")
                 continue
-
         return conges
+
+    def get_employe_by_matricule(self, matricule):
+        """Récupère un employé par matricule"""
+        try:
+            return EmployeDAO.trouver_par_matricule(matricule)
+        except Exception as e:
+            print(f"❌ Erreur: {e}")
+            return None
+
+    def get_employe_by_id(self, employe_id):
+        """Récupère un employé par ID"""
+        try:
+            return EmployeDAO.trouver_par_id(employe_id)
+        except Exception as e:
+            print(f"❌ Erreur: {e}")
+            return None

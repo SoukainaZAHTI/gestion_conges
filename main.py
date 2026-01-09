@@ -52,16 +52,42 @@ def main():
                 else:
                     print("❌ Identifiants incorrects")
 
+
             elif choix == "2":
+
                 login = input("Nouveau login: ")
+
                 mdp = input("Mot de passe: ")
+
                 matricule = input("Votre matricule: ")
+
                 nom = input("Nom: ")
+
                 prenom = input("Prénom: ")
+
                 service = input("Service: ")
 
-                if auth.creer_utilisateur(login, mdp, "Employe"):
-                    gc.add_employe(matricule, nom, prenom, service)
+                emp = gc.get_employe_by_matricule(matricule)
+
+                if emp:
+
+                    print("ℹ️ Employé existant détecté")
+
+                    # Create only the user account
+
+                    if auth.creer_utilisateur(login, mdp, "Employe"):
+                        print("✅ Compte utilisateur créé et lié à l’employé existant")
+
+
+                else:
+
+                    print("ℹ️ Nouvel employé — création employé + compte")
+
+                    if auth.creer_utilisateur(login, mdp, "Employe"):
+                        gc.add_employe(matricule, nom, prenom, service)
+
+                        print("✅ Employé et compte créés avec succès")
+
 
             elif choix == "3":
                 print("Au revoir!")
